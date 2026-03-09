@@ -15,6 +15,7 @@ mod matrix;
 mod mcp;
 mod protocol;
 mod render;
+mod scripting;
 mod slack;
 
 use clap::{Parser, Subcommand};

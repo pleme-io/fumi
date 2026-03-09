@@ -674,6 +674,80 @@ impl RenderCallback for ChatRenderer {
 }
 
 // ---------------------------------------------------------------------------
+// Awase hotkey bridge
+// ---------------------------------------------------------------------------
+
+/// Convert a madori `KeyEvent` to an awase `Hotkey` (when possible).
+///
+/// Provides a bridge between madori's input events and awase's hotkey
+/// system, enabling user-configurable keybindings via awase's
+/// `Hotkey::parse()` format (e.g., `"cmd+space"`, `"ctrl+n"`).
+#[must_use]
+pub fn to_awase_hotkey(event: &KeyEvent) -> Option<awase::Hotkey> {
+    let key = madori_key_to_awase(&event.key)?;
+    let mut mods = awase::Modifiers::NONE;
+    if event.modifiers.shift {
+        mods |= awase::Modifiers::SHIFT;
+    }
+    if event.modifiers.ctrl {
+        mods |= awase::Modifiers::CTRL;
+    }
+    if event.modifiers.alt {
+        mods |= awase::Modifiers::ALT;
+    }
+    if event.modifiers.meta {
+        mods |= awase::Modifiers::CMD;
+    }
+    Some(awase::Hotkey::new(mods, key))
+}
+
+/// Map a madori `KeyCode` to an awase `Key`.
+fn madori_key_to_awase(key: &KeyCode) -> Option<awase::Key> {
+    match key {
+        KeyCode::Char(c) => match c.to_ascii_lowercase() {
+            'a' => Some(awase::Key::A), 'b' => Some(awase::Key::B),
+            'c' => Some(awase::Key::C), 'd' => Some(awase::Key::D),
+            'e' => Some(awase::Key::E), 'f' => Some(awase::Key::F),
+            'g' => Some(awase::Key::G), 'h' => Some(awase::Key::H),
+            'i' => Some(awase::Key::I), 'j' => Some(awase::Key::J),
+            'k' => Some(awase::Key::K), 'l' => Some(awase::Key::L),
+            'm' => Some(awase::Key::M), 'n' => Some(awase::Key::N),
+            'o' => Some(awase::Key::O), 'p' => Some(awase::Key::P),
+            'q' => Some(awase::Key::Q), 'r' => Some(awase::Key::R),
+            's' => Some(awase::Key::S), 't' => Some(awase::Key::T),
+            'u' => Some(awase::Key::U), 'v' => Some(awase::Key::V),
+            'w' => Some(awase::Key::W), 'x' => Some(awase::Key::X),
+            'y' => Some(awase::Key::Y), 'z' => Some(awase::Key::Z),
+            _ => None,
+        },
+        KeyCode::Space => Some(awase::Key::Space),
+        KeyCode::Enter => Some(awase::Key::Return),
+        KeyCode::Escape => Some(awase::Key::Escape),
+        KeyCode::Tab => Some(awase::Key::Tab),
+        KeyCode::Backspace => Some(awase::Key::Backspace),
+        KeyCode::Delete => Some(awase::Key::Delete),
+        KeyCode::Up => Some(awase::Key::Up),
+        KeyCode::Down => Some(awase::Key::Down),
+        KeyCode::Left => Some(awase::Key::Left),
+        KeyCode::Right => Some(awase::Key::Right),
+        _ => None,
+    }
+}
+
+/// Check if a key event matches an awase hotkey string.
+///
+/// Enables config-driven keybinding lookups.
+#[must_use]
+pub fn matches_hotkey(event: &KeyEvent, hotkey_str: &str) -> bool {
+    let Some(event_hk) = to_awase_hotkey(event) else {
+        return false;
+    };
+    awase::Hotkey::parse(hotkey_str)
+        .map(|parsed| parsed == event_hk)
+        .unwrap_or(false)
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 

@@ -35,6 +35,8 @@ todoku = { git = "https://github.com/pleme-io/todoku" }
 tsunagu = { git = "https://github.com/pleme-io/tsunagu" }
 kaname = { git = "https://github.com/pleme-io/kaname" }
 shikumi = { git = "https://github.com/pleme-io/shikumi" }
+soushi = { git = "https://github.com/pleme-io/soushi" }
+awase = { git = "https://github.com/pleme-io/awase" }
 
 # MCP server (rmcp + schemars needed for derive macros used alongside kaname)
 rmcp = { version = "0.15", features = ["server", "transport-io"] }

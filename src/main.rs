@@ -12,6 +12,7 @@ mod config;
 mod daemon;
 mod discord;
 mod matrix;
+mod mcp;
 mod protocol;
 mod render;
 mod slack;
@@ -55,6 +56,8 @@ enum Commands {
     },
     /// Check daemon health status
     Health,
+    /// Start MCP server (stdio transport)
+    Mcp,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -84,6 +87,12 @@ fn main() -> anyhow::Result<()> {
         }
         Some(Commands::Health) => {
             check_health();
+        }
+        Some(Commands::Mcp) => {
+            let rt = tokio::runtime::Runtime::new()?;
+            rt.block_on(async {
+                mcp::run().await.map_err(|e| anyhow::anyhow!("MCP server error: {e}"))
+            })?;
         }
     }
 

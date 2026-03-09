@@ -36,6 +36,10 @@ tsunagu = { git = "https://github.com/pleme-io/tsunagu" }
 kaname = { git = "https://github.com/pleme-io/kaname" }
 shikumi = { git = "https://github.com/pleme-io/shikumi" }
 
+# MCP server (rmcp + schemars needed for derive macros used alongside kaname)
+rmcp = { version = "0.15", features = ["server", "transport-io"] }
+schemars = "0.8"
+
 # GPU rendering
 wgpu = "25"
 winit = "0.30"

@@ -12,13 +12,14 @@
 
 use std::sync::Arc;
 
+use futures_util::{SinkExt, StreamExt};
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{broadcast, RwLock};
 
 use crate::protocol::{
-    Attachment, Channel, ChannelType, ChatBackend, ChatError, ChatEvent, Message, Protocol,
-    Reaction, Server, User,
+    Attachment, Channel, ChannelType, ChatBackend, ChatError, ChatEvent, Member, Message,
+    PresenceStatus, Protocol, Reaction, Server, User,
 };
 
 /// Broadcast channel capacity for Slack events.
@@ -61,6 +62,12 @@ struct SlackChannel {
     is_im: Option<bool>,
     is_mpim: Option<bool>,
     num_members: Option<u32>,
+    topic: Option<SlackTopic>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SlackTopic {
+    value: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -111,6 +118,45 @@ struct PostMessageData {
     message: Option<SlackMessage>,
 }
 
+#[derive(Debug, Deserialize)]
+struct ConnectionsOpenData {
+    url: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ConversationsMembersData {
+    members: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct UsersInfoData {
+    user: Option<SlackUser>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SlackUser {
+    id: String,
+    name: Option<String>,
+    real_name: Option<String>,
+    profile: Option<SlackProfile>,
+    is_bot: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SlackProfile {
+    display_name: Option<String>,
+    image_48: Option<String>,
+}
+
+/// Socket Mode envelope from Slack.
+#[derive(Debug, Deserialize)]
+struct SocketModeEnvelope {
+    envelope_id: Option<String>,
+    #[serde(rename = "type")]
+    envelope_type: Option<String>,
+    payload: Option<serde_json::Value>,
+}
+
 // ---------------------------------------------------------------------------
 // Backend
 // ---------------------------------------------------------------------------
@@ -120,6 +166,7 @@ struct PostMessageData {
 /// Each instance represents a single Slack workspace connection.
 pub struct SlackBackend {
     token: String,
+    app_token: Option<String>,
     workspace_name: String,
     servers: Vec<Server>,
     event_tx: broadcast::Sender<ChatEvent>,
@@ -139,7 +186,15 @@ impl SlackBackend {
     ///
     /// `token` should be a Slack Bot Token (`xoxb-...`) or User Token
     /// (`xoxp-...`) with the appropriate scopes.
+    ///
+    /// `app_token` is an optional App-Level Token (`xapp-...`) required
+    /// for Socket Mode real-time events.
     pub fn new(workspace_name: &str, token: &str) -> Self {
+        Self::with_app_token(workspace_name, token, None)
+    }
+
+    /// Create with an explicit app-level token for Socket Mode.
+    pub fn with_app_token(workspace_name: &str, token: &str, app_token: Option<&str>) -> Self {
         let (event_tx, _) = broadcast::channel(EVENT_CHANNEL_CAPACITY);
 
         let mut headers = HeaderMap::new();
@@ -157,6 +212,7 @@ impl SlackBackend {
 
         Self {
             token: token.to_owned(),
+            app_token: app_token.map(str::to_owned),
             workspace_name: workspace_name.to_owned(),
             servers: Vec::new(),
             event_tx,
@@ -229,6 +285,253 @@ impl SlackBackend {
             .data
             .ok_or_else(|| ChatError::Api("empty response data".into()))
     }
+
+    /// Call a Slack Web API method (POST) using the app token for Socket Mode.
+    async fn api_post_app_token<T: serde::de::DeserializeOwned>(
+        &self,
+        method: &str,
+    ) -> Result<T, ChatError> {
+        let app_token = self
+            .app_token
+            .as_ref()
+            .ok_or_else(|| ChatError::Connection("app token required for Socket Mode".into()))?;
+
+        let url = format!("{SLACK_API_BASE}/{method}");
+        let resp = reqwest::Client::new()
+            .post(&url)
+            .header(AUTHORIZATION, format!("Bearer {app_token}"))
+            .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
+            .send()
+            .await
+            .map_err(|e| ChatError::Api(e.to_string()))?;
+
+        let api_resp: SlackApiResponse<T> = resp
+            .json()
+            .await
+            .map_err(|e| ChatError::Api(e.to_string()))?;
+
+        if !api_resp.ok {
+            return Err(ChatError::Api(
+                api_resp.error.unwrap_or_else(|| "unknown error".into()),
+            ));
+        }
+
+        api_resp
+            .data
+            .ok_or_else(|| ChatError::Api("empty response data".into()))
+    }
+
+    /// Start Socket Mode WebSocket for real-time events.
+    async fn start_socket_mode(&mut self) -> Result<(), ChatError> {
+        // Only start if we have an app token.
+        let Some(_app_token) = &self.app_token else {
+            tracing::info!("no app token provided, Socket Mode disabled (polling only)");
+            return Ok(());
+        };
+
+        let data: ConnectionsOpenData = self.api_post_app_token("apps.connections.open").await?;
+
+        let ws_url = data
+            .url
+            .ok_or_else(|| ChatError::Connection("no WebSocket URL in response".into()))?;
+
+        let event_tx = self.event_tx.clone();
+        let self_user_id = self.self_user_id.clone().unwrap_or_default();
+
+        self.socket_handle = Some(tokio::spawn(async move {
+            tracing::info!("connecting to Slack Socket Mode WebSocket");
+
+            let connect_result = tokio_tungstenite::connect_async(&ws_url).await;
+            let (mut ws, _) = match connect_result {
+                Ok(conn) => conn,
+                Err(e) => {
+                    tracing::error!("Slack Socket Mode connection failed: {e}");
+                    return;
+                }
+            };
+
+            tracing::info!("Slack Socket Mode connected");
+
+            while let Some(msg_result) = ws.next().await {
+                let msg = match msg_result {
+                    Ok(m) => m,
+                    Err(e) => {
+                        tracing::error!("Slack WebSocket error: {e}");
+                        break;
+                    }
+                };
+
+                if let tokio_tungstenite::tungstenite::Message::Text(text) = msg {
+                    if let Ok(envelope) = serde_json::from_str::<SocketModeEnvelope>(&text) {
+                        // Acknowledge the envelope.
+                        if let Some(envelope_id) = &envelope.envelope_id {
+                            let ack = serde_json::json!({"envelope_id": envelope_id});
+                            let _ = ws
+                                .send(tokio_tungstenite::tungstenite::Message::Text(
+                                    ack.to_string().into(),
+                                ))
+                                .await;
+                        }
+
+                        // Process event payloads.
+                        if envelope.envelope_type.as_deref() == Some("events_api") {
+                            if let Some(payload) = &envelope.payload {
+                                if let Some(event) = payload.get("event") {
+                                    let event_type =
+                                        event.get("type").and_then(|t| t.as_str());
+
+                                    match event_type {
+                                        Some("message") => {
+                                            if let (Some(channel), Some(ts), Some(text_val)) = (
+                                                event.get("channel").and_then(|c| c.as_str()),
+                                                event.get("ts").and_then(|t| t.as_str()),
+                                                event.get("text").and_then(|t| t.as_str()),
+                                            ) {
+                                                let user_id = event
+                                                    .get("user")
+                                                    .and_then(|u| u.as_str())
+                                                    .unwrap_or("unknown")
+                                                    .to_owned();
+                                                let msg = Message {
+                                                    id: ts.to_owned(),
+                                                    protocol: Protocol::Slack,
+                                                    channel_id: channel.to_owned(),
+                                                    author: User {
+                                                        id: user_id.clone(),
+                                                        name: user_id,
+                                                        display_name: None,
+                                                        avatar_url: None,
+                                                        protocol: Protocol::Slack,
+                                                        bot: false,
+                                                    },
+                                                    content: text_val.to_owned(),
+                                                    timestamp: slack_ts_to_unix(ts),
+                                                    edited: false,
+                                                    attachments: vec![],
+                                                    reactions: vec![],
+                                                    reply_to: event
+                                                        .get("thread_ts")
+                                                        .and_then(|t| t.as_str())
+                                                        .map(str::to_owned),
+                                                };
+                                                let _ = event_tx
+                                                    .send(ChatEvent::MessageReceived(msg));
+                                            }
+                                        }
+                                        Some("message_changed") => {
+                                            // Edited message event.
+                                            if let Some(message_obj) =
+                                                event.get("message")
+                                            {
+                                                if let (Some(channel), Some(ts), Some(text_val)) = (
+                                                    event.get("channel").and_then(|c| c.as_str()),
+                                                    message_obj
+                                                        .get("ts")
+                                                        .and_then(|t| t.as_str()),
+                                                    message_obj
+                                                        .get("text")
+                                                        .and_then(|t| t.as_str()),
+                                                ) {
+                                                    let user_id = message_obj
+                                                        .get("user")
+                                                        .and_then(|u| u.as_str())
+                                                        .unwrap_or("unknown")
+                                                        .to_owned();
+                                                    let msg = Message {
+                                                        id: ts.to_owned(),
+                                                        protocol: Protocol::Slack,
+                                                        channel_id: channel.to_owned(),
+                                                        author: User {
+                                                            id: user_id.clone(),
+                                                            name: user_id,
+                                                            display_name: None,
+                                                            avatar_url: None,
+                                                            protocol: Protocol::Slack,
+                                                            bot: false,
+                                                        },
+                                                        content: text_val.to_owned(),
+                                                        timestamp: slack_ts_to_unix(ts),
+                                                        edited: true,
+                                                        attachments: vec![],
+                                                        reactions: vec![],
+                                                        reply_to: None,
+                                                    };
+                                                    let _ = event_tx
+                                                        .send(ChatEvent::MessageEdited(msg));
+                                                }
+                                            }
+                                        }
+                                        Some("message_deleted") => {
+                                            if let (Some(channel), Some(ts)) = (
+                                                event.get("channel").and_then(|c| c.as_str()),
+                                                event
+                                                    .get("deleted_ts")
+                                                    .and_then(|t| t.as_str()),
+                                            ) {
+                                                let _ = event_tx.send(
+                                                    ChatEvent::MessageDeleted {
+                                                        channel_id: channel.to_owned(),
+                                                        message_id: ts.to_owned(),
+                                                    },
+                                                );
+                                            }
+                                        }
+                                        Some("user_typing") => {
+                                            if let (Some(channel), Some(user_id)) = (
+                                                event.get("channel").and_then(|c| c.as_str()),
+                                                event.get("user").and_then(|u| u.as_str()),
+                                            ) {
+                                                let user = User {
+                                                    id: user_id.to_owned(),
+                                                    name: user_id.to_owned(),
+                                                    display_name: None,
+                                                    avatar_url: None,
+                                                    protocol: Protocol::Slack,
+                                                    bot: false,
+                                                };
+                                                let _ = event_tx.send(
+                                                    ChatEvent::TypingStarted {
+                                                        channel_id: channel.to_owned(),
+                                                        user,
+                                                    },
+                                                );
+                                            }
+                                        }
+                                        Some("presence_change") => {
+                                            if let (Some(user_id), Some(presence)) = (
+                                                event.get("user").and_then(|u| u.as_str()),
+                                                event
+                                                    .get("presence")
+                                                    .and_then(|p| p.as_str()),
+                                            ) {
+                                                let status = match presence {
+                                                    "active" => PresenceStatus::Online,
+                                                    "away" => PresenceStatus::Idle,
+                                                    _ => PresenceStatus::Offline,
+                                                };
+                                                let _ = event_tx.send(
+                                                    ChatEvent::PresenceChanged {
+                                                        user_id: user_id.to_owned(),
+                                                        status,
+                                                    },
+                                                );
+                                            }
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            tracing::info!("Slack Socket Mode disconnected");
+            let _ = self_user_id;
+        }));
+
+        Ok(())
+    }
 }
 
 impl ChatBackend for SlackBackend {
@@ -262,8 +565,8 @@ impl ChatBackend for SlackBackend {
         let channels: Vec<Channel> = convos
             .channels
             .unwrap_or_default()
-            .into_iter()
-            .map(|ch| slack_channel_to_protocol(&ch))
+            .iter()
+            .map(slack_channel_to_protocol)
             .collect();
 
         self.servers = vec![Server {
@@ -275,30 +578,7 @@ impl ChatBackend for SlackBackend {
         }];
 
         // 3. Start Socket Mode WebSocket for real-time events.
-        //
-        // TODO: Open a Socket Mode connection:
-        //   a. Call apps.connections.open to get a WebSocket URL.
-        //   b. Connect via tokio-tungstenite.
-        //   c. Parse incoming Socket Mode envelopes, acknowledge them,
-        //      and convert payload events to ChatEvent variants:
-        //      - message → ChatEvent::MessageReceived
-        //      - message_changed → ChatEvent::MessageEdited
-        //      - message_deleted → ChatEvent::MessageDeleted
-        //      - user_typing → ChatEvent::TypingStarted
-        //      - presence_change → ChatEvent::PresenceChanged
-        //
-        // Skeleton:
-        //
-        //   let ws_url = self.api_post::<ConnectionsOpenData, _>(
-        //       "apps.connections.open", &()
-        //   ).await?.url;
-        //
-        //   let event_tx = self.event_tx.clone();
-        //   self.socket_handle = Some(tokio::spawn(async move {
-        //       let (ws, _) = tokio_tungstenite::connect_async(&ws_url)
-        //           .await.expect("ws connect");
-        //       // read loop ...
-        //   }));
+        self.start_socket_mode().await?;
 
         self.connected = true;
         let _ = self.event_tx.send(ChatEvent::Connected(Protocol::Slack));
@@ -400,12 +680,51 @@ impl ChatBackend for SlackBackend {
         Ok(messages)
     }
 
+    async fn list_members(
+        &self,
+        channel_id: &str,
+    ) -> Result<Vec<Member>, ChatError> {
+        if !self.connected {
+            return Err(ChatError::NotConnected);
+        }
+
+        let data: ConversationsMembersData = self
+            .api_get("conversations.members", &[("channel", channel_id), ("limit", "100")])
+            .await?;
+
+        let member_ids = data.members.unwrap_or_default();
+
+        // Fetch user info for each member. In production you'd batch this.
+        let mut members = Vec::new();
+        for user_id in member_ids.iter().take(50) {
+            // Limit to avoid rate limits
+            if let Ok(user_data) = self
+                .api_get::<UsersInfoData>("users.info", &[("user", user_id)])
+                .await
+            {
+                if let Some(slack_user) = user_data.user {
+                    members.push(Member {
+                        user: slack_user_to_protocol(&slack_user),
+                        presence: PresenceStatus::Online,
+                        role: None,
+                    });
+                }
+            }
+        }
+
+        Ok(members)
+    }
+
     fn events(&self) -> broadcast::Receiver<ChatEvent> {
         self.event_tx.subscribe()
     }
 
     fn protocol(&self) -> Protocol {
         Protocol::Slack
+    }
+
+    fn is_connected(&self) -> bool {
+        self.connected
     }
 }
 
@@ -428,6 +747,8 @@ fn slack_channel_to_protocol(ch: &SlackChannel) -> Channel {
         name: ch.name.clone().unwrap_or_else(|| ch.id.clone()),
         protocol: Protocol::Slack,
         channel_type,
+        server_id: None,
+        topic: ch.topic.as_ref().and_then(|t| t.value.clone()),
         unread: 0,
         mention_count: 0,
     }
@@ -478,6 +799,22 @@ fn slack_message_to_protocol(msg: SlackMessage, channel_id: &str) -> Message {
     }
 }
 
+/// Convert a Slack user API object to a protocol [`User`].
+fn slack_user_to_protocol(user: &SlackUser) -> User {
+    User {
+        id: user.id.clone(),
+        name: user.name.clone().unwrap_or_else(|| user.id.clone()),
+        display_name: user
+            .profile
+            .as_ref()
+            .and_then(|p| p.display_name.clone())
+            .or_else(|| user.real_name.clone()),
+        avatar_url: user.profile.as_ref().and_then(|p| p.image_48.clone()),
+        protocol: Protocol::Slack,
+        bot: user.is_bot.unwrap_or(false),
+    }
+}
+
 /// Convert a Slack timestamp string (e.g. "1700000000.000100") to a Unix
 /// epoch in seconds.
 fn slack_ts_to_unix(ts: &str) -> u64 {
@@ -501,6 +838,7 @@ mod tests {
         assert!(!backend.connected);
         assert_eq!(backend.protocol(), Protocol::Slack);
         assert!(backend.servers().is_empty());
+        assert!(!backend.is_connected());
     }
 
     #[test]
@@ -541,6 +879,7 @@ mod tests {
             is_im: Some(false),
             is_mpim: Some(false),
             num_members: Some(42),
+            topic: Some(SlackTopic { value: Some("Welcome!".into()) }),
         };
 
         let converted = slack_channel_to_protocol(&ch);
@@ -548,6 +887,7 @@ mod tests {
         assert_eq!(converted.name, "general");
         assert_eq!(converted.channel_type, ChannelType::Text);
         assert_eq!(converted.protocol, Protocol::Slack);
+        assert_eq!(converted.topic.as_deref(), Some("Welcome!"));
     }
 
     #[test]
@@ -560,11 +900,11 @@ mod tests {
             is_im: Some(true),
             is_mpim: Some(false),
             num_members: None,
+            topic: None,
         };
 
         let converted = slack_channel_to_protocol(&ch);
         assert_eq!(converted.channel_type, ChannelType::Direct);
-        // When name is None, falls back to id.
         assert_eq!(converted.name, "D456");
     }
 
@@ -578,6 +918,7 @@ mod tests {
             is_im: Some(false),
             is_mpim: Some(true),
             num_members: Some(3),
+            topic: None,
         };
 
         let converted = slack_channel_to_protocol(&ch);
@@ -663,5 +1004,29 @@ mod tests {
         let mut backend = SlackBackend::new("ws", "xoxb-tok");
         let result = backend.disconnect().await;
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn slack_user_conversion() {
+        let user = SlackUser {
+            id: "U123".into(),
+            name: Some("alice".into()),
+            real_name: Some("Alice Smith".into()),
+            profile: Some(SlackProfile {
+                display_name: Some("Alice".into()),
+                image_48: Some("https://avatars.slack.com/alice.png".into()),
+            }),
+            is_bot: Some(false),
+        };
+
+        let converted = slack_user_to_protocol(&user);
+        assert_eq!(converted.id, "U123");
+        assert_eq!(converted.name, "alice");
+        assert_eq!(converted.display_name, Some("Alice".into()));
+        assert_eq!(
+            converted.avatar_url,
+            Some("https://avatars.slack.com/alice.png".into())
+        );
+        assert!(!converted.bot);
     }
 }

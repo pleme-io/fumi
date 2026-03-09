@@ -79,6 +79,14 @@ pub struct User {
     pub bot: bool,
 }
 
+impl User {
+    /// Returns the display name if set, otherwise the username.
+    #[must_use]
+    pub fn effective_name(&self) -> &str {
+        self.display_name.as_deref().unwrap_or(&self.name)
+    }
+}
+
 /// A channel (text channel, DM, room, etc.).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Channel {
@@ -86,6 +94,8 @@ pub struct Channel {
     pub name: String,
     pub protocol: Protocol,
     pub channel_type: ChannelType,
+    pub server_id: Option<String>,
+    pub topic: Option<String>,
     pub unread: u32,
     pub mention_count: u32,
 }
@@ -115,6 +125,14 @@ pub struct Server {
     pub protocol: Protocol,
     pub icon_url: Option<String>,
     pub channels: Vec<Channel>,
+}
+
+/// Member of a channel with presence info.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Member {
+    pub user: User,
+    pub presence: PresenceStatus,
+    pub role: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -173,6 +191,8 @@ pub enum ChatError {
     Api(String),
     #[error("not connected")]
     NotConnected,
+    #[error("channel not found: {0}")]
+    ChannelNotFound(String),
 }
 
 // ---------------------------------------------------------------------------
@@ -211,12 +231,274 @@ pub trait ChatBackend: Send + Sync {
         before: Option<&str>,
     ) -> impl std::future::Future<Output = Result<Vec<Message>, ChatError>> + Send;
 
+    /// List members of a channel.
+    fn list_members(
+        &self,
+        channel_id: &str,
+    ) -> impl std::future::Future<Output = Result<Vec<Member>, ChatError>> + Send;
+
     /// Subscribe to real-time events. Returns a broadcast receiver that
     /// yields [`ChatEvent`] values.
     fn events(&self) -> tokio::sync::broadcast::Receiver<ChatEvent>;
 
     /// Protocol identifier for this backend.
     fn protocol(&self) -> Protocol;
+
+    /// Whether the backend is currently connected.
+    fn is_connected(&self) -> bool;
+}
+
+// ---------------------------------------------------------------------------
+// Unified Store
+// ---------------------------------------------------------------------------
+
+/// Merged view of all protocol data, providing the data source for the UI.
+///
+/// Normalizes protocol-specific data into common types, maintains a merged
+/// timeline across protocols, and tracks unread/mention counts.
+pub struct UnifiedStore {
+    /// All servers from all protocols.
+    servers: Vec<Server>,
+    /// Messages keyed by channel_id.
+    messages: std::collections::HashMap<String, Vec<Message>>,
+    /// Currently active channel.
+    active_channel: Option<String>,
+    /// Currently active server.
+    active_server: Option<String>,
+    /// Members of the active channel.
+    members: Vec<Member>,
+    /// Users currently typing in the active channel.
+    typing: Vec<(String, User)>,
+}
+
+impl UnifiedStore {
+    /// Create a new empty unified store.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            servers: Vec::new(),
+            messages: std::collections::HashMap::new(),
+            active_channel: None,
+            active_server: None,
+            members: Vec::new(),
+            typing: Vec::new(),
+        }
+    }
+
+    /// Merge servers from a protocol backend into the store.
+    pub fn merge_servers(&mut self, protocol: Protocol, new_servers: &[Server]) {
+        // Remove old servers for this protocol.
+        self.servers.retain(|s| s.protocol != protocol);
+        // Add new ones.
+        self.servers.extend_from_slice(new_servers);
+    }
+
+    /// All servers across all protocols.
+    #[must_use]
+    pub fn servers(&self) -> &[Server] {
+        &self.servers
+    }
+
+    /// Get all channels from all servers, flattened.
+    #[must_use]
+    pub fn all_channels(&self) -> Vec<&Channel> {
+        self.servers.iter().flat_map(|s| &s.channels).collect()
+    }
+
+    /// Get channels for the active server.
+    #[must_use]
+    pub fn active_server_channels(&self) -> Vec<&Channel> {
+        if let Some(server_id) = &self.active_server {
+            self.servers
+                .iter()
+                .find(|s| s.id == *server_id)
+                .map_or_else(Vec::new, |s| s.channels.iter().collect())
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// Set the active server.
+    pub fn set_active_server(&mut self, server_id: &str) {
+        self.active_server = Some(server_id.to_owned());
+    }
+
+    /// Set the active channel.
+    pub fn set_active_channel(&mut self, channel_id: &str) {
+        self.active_channel = Some(channel_id.to_owned());
+    }
+
+    /// Get the active channel ID.
+    #[must_use]
+    pub fn active_channel(&self) -> Option<&str> {
+        self.active_channel.as_deref()
+    }
+
+    /// Get the active server ID.
+    #[must_use]
+    pub fn active_server_id(&self) -> Option<&str> {
+        self.active_server.as_deref()
+    }
+
+    /// Get messages for the active channel.
+    #[must_use]
+    pub fn active_messages(&self) -> &[Message] {
+        self.active_channel
+            .as_ref()
+            .and_then(|ch| self.messages.get(ch))
+            .map_or(&[], Vec::as_slice)
+    }
+
+    /// Get messages for a specific channel.
+    #[must_use]
+    pub fn channel_messages(&self, channel_id: &str) -> &[Message] {
+        self.messages
+            .get(channel_id)
+            .map_or(&[], Vec::as_slice)
+    }
+
+    /// Store fetched messages for a channel.
+    pub fn set_messages(&mut self, channel_id: &str, msgs: Vec<Message>) {
+        self.messages.insert(channel_id.to_owned(), msgs);
+    }
+
+    /// Add a single message (from a real-time event).
+    pub fn add_message(&mut self, msg: Message) {
+        self.messages
+            .entry(msg.channel_id.clone())
+            .or_default()
+            .push(msg);
+    }
+
+    /// Update a message (edit).
+    pub fn update_message(&mut self, msg: Message) {
+        if let Some(messages) = self.messages.get_mut(&msg.channel_id) {
+            if let Some(existing) = messages.iter_mut().find(|m| m.id == msg.id) {
+                *existing = msg;
+            }
+        }
+    }
+
+    /// Remove a message (delete).
+    pub fn remove_message(&mut self, channel_id: &str, message_id: &str) {
+        if let Some(messages) = self.messages.get_mut(channel_id) {
+            messages.retain(|m| m.id != message_id);
+        }
+    }
+
+    /// Set members for the active channel.
+    pub fn set_members(&mut self, members: Vec<Member>) {
+        self.members = members;
+    }
+
+    /// Get members of the active channel.
+    #[must_use]
+    pub fn members(&self) -> &[Member] {
+        &self.members
+    }
+
+    /// Record that a user is typing.
+    pub fn set_typing(&mut self, channel_id: &str, user: User) {
+        if self.active_channel.as_deref() == Some(channel_id) {
+            // Remove old entry for this user, then add new.
+            self.typing.retain(|(_, u)| u.id != user.id);
+            self.typing.push((channel_id.to_owned(), user));
+        }
+    }
+
+    /// Clear typing indicator for a user (e.g. after they sent a message).
+    pub fn clear_typing(&mut self, user_id: &str) {
+        self.typing.retain(|(_, u)| u.id != user_id);
+    }
+
+    /// Get users currently typing in the active channel.
+    #[must_use]
+    pub fn typing_users(&self) -> Vec<&User> {
+        self.typing.iter().map(|(_, u)| u).collect()
+    }
+
+    /// Process a chat event and update the store accordingly.
+    pub fn handle_event(&mut self, event: &ChatEvent) {
+        match event {
+            ChatEvent::MessageReceived(msg) => {
+                // Clear typing for the author.
+                self.clear_typing(&msg.author.id);
+                self.add_message(msg.clone());
+            }
+            ChatEvent::MessageEdited(msg) => {
+                self.update_message(msg.clone());
+            }
+            ChatEvent::MessageDeleted {
+                channel_id,
+                message_id,
+            } => {
+                self.remove_message(channel_id, message_id);
+            }
+            ChatEvent::TypingStarted { channel_id, user } => {
+                self.set_typing(channel_id, user.clone());
+            }
+            ChatEvent::PresenceChanged { user_id, status } => {
+                // Update member presence if visible.
+                if let Some(member) = self.members.iter_mut().find(|m| m.user.id == *user_id) {
+                    member.presence = *status;
+                }
+            }
+            ChatEvent::ChannelUpdated(channel) => {
+                // Update the channel in its server.
+                for server in &mut self.servers {
+                    if let Some(ch) = server.channels.iter_mut().find(|c| c.id == channel.id) {
+                        *ch = channel.clone();
+                    }
+                }
+            }
+            ChatEvent::Connected(_) | ChatEvent::Disconnected(_) | ChatEvent::Error { .. } => {
+                // Connection state changes handled at a higher level.
+            }
+        }
+    }
+
+    /// Total unread count across all channels.
+    #[must_use]
+    pub fn total_unread(&self) -> u32 {
+        self.servers
+            .iter()
+            .flat_map(|s| &s.channels)
+            .map(|c| c.unread)
+            .sum()
+    }
+
+    /// Total mention count across all channels.
+    #[must_use]
+    pub fn total_mentions(&self) -> u32 {
+        self.servers
+            .iter()
+            .flat_map(|s| &s.channels)
+            .map(|c| c.mention_count)
+            .sum()
+    }
+
+    /// Find the channel info for the active channel.
+    #[must_use]
+    pub fn active_channel_info(&self) -> Option<&Channel> {
+        let active_id = self.active_channel.as_ref()?;
+        self.servers
+            .iter()
+            .flat_map(|s| &s.channels)
+            .find(|c| c.id == *active_id)
+    }
+
+    /// Find the server info for the active server.
+    #[must_use]
+    pub fn active_server_info(&self) -> Option<&Server> {
+        let active_id = self.active_server.as_ref()?;
+        self.servers.iter().find(|s| s.id == *active_id)
+    }
+}
+
+impl Default for UnifiedStore {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -298,6 +580,8 @@ mod tests {
                     name: "general".into(),
                     protocol: Protocol::Discord,
                     channel_type: ChannelType::Text,
+                    server_id: Some("srv-1".into()),
+                    topic: None,
                     unread: 5,
                     mention_count: 1,
                 },
@@ -306,6 +590,8 @@ mod tests {
                     name: "voice-lobby".into(),
                     protocol: Protocol::Discord,
                     channel_type: ChannelType::Voice,
+                    server_id: Some("srv-1".into()),
+                    topic: None,
                     unread: 0,
                     mention_count: 0,
                 },
@@ -348,7 +634,6 @@ mod tests {
 
     #[test]
     fn chat_event_variants() {
-        // Ensure all event variants can be constructed.
         let user = User {
             id: "u-1".into(),
             name: "bob".into(),
@@ -391,6 +676,8 @@ mod tests {
                 name: "general".into(),
                 protocol: Protocol::Matrix,
                 channel_type: ChannelType::Text,
+                server_id: None,
+                topic: None,
                 unread: 0,
                 mention_count: 0,
             }),
@@ -429,5 +716,127 @@ mod tests {
 
         assert!(msg.edited);
         assert_eq!(msg.reply_to.as_deref(), Some("m-1"));
+    }
+
+    #[test]
+    fn user_effective_name() {
+        let user_with_display = User {
+            id: "u1".into(),
+            name: "alice".into(),
+            display_name: Some("Alice W.".into()),
+            avatar_url: None,
+            protocol: Protocol::Discord,
+            bot: false,
+        };
+        assert_eq!(user_with_display.effective_name(), "Alice W.");
+
+        let user_without_display = User {
+            id: "u2".into(),
+            name: "bob".into(),
+            display_name: None,
+            avatar_url: None,
+            protocol: Protocol::Discord,
+            bot: false,
+        };
+        assert_eq!(user_without_display.effective_name(), "bob");
+    }
+
+    #[test]
+    fn unified_store_merge_servers() {
+        let mut store = UnifiedStore::new();
+        let servers = vec![Server {
+            id: "s1".into(),
+            name: "Test".into(),
+            protocol: Protocol::Discord,
+            icon_url: None,
+            channels: vec![],
+        }];
+        store.merge_servers(Protocol::Discord, &servers);
+        assert_eq!(store.servers().len(), 1);
+
+        // Merging again replaces.
+        let servers2 = vec![
+            Server {
+                id: "s1".into(),
+                name: "Test".into(),
+                protocol: Protocol::Discord,
+                icon_url: None,
+                channels: vec![],
+            },
+            Server {
+                id: "s2".into(),
+                name: "Test2".into(),
+                protocol: Protocol::Discord,
+                icon_url: None,
+                channels: vec![],
+            },
+        ];
+        store.merge_servers(Protocol::Discord, &servers2);
+        assert_eq!(store.servers().len(), 2);
+    }
+
+    #[test]
+    fn unified_store_messages() {
+        let mut store = UnifiedStore::new();
+        let msg = Message {
+            id: "m1".into(),
+            protocol: Protocol::Discord,
+            channel_id: "ch1".into(),
+            author: User {
+                id: "u1".into(),
+                name: "alice".into(),
+                display_name: None,
+                avatar_url: None,
+                protocol: Protocol::Discord,
+                bot: false,
+            },
+            content: "hello".into(),
+            timestamp: 1000,
+            edited: false,
+            attachments: vec![],
+            reactions: vec![],
+            reply_to: None,
+        };
+        store.add_message(msg);
+        assert_eq!(store.channel_messages("ch1").len(), 1);
+        assert_eq!(store.channel_messages("ch2").len(), 0);
+
+        store.set_active_channel("ch1");
+        assert_eq!(store.active_messages().len(), 1);
+    }
+
+    #[test]
+    fn unified_store_handle_event() {
+        let mut store = UnifiedStore::new();
+        store.set_active_channel("ch1");
+
+        let msg = Message {
+            id: "m1".into(),
+            protocol: Protocol::Discord,
+            channel_id: "ch1".into(),
+            author: User {
+                id: "u1".into(),
+                name: "alice".into(),
+                display_name: None,
+                avatar_url: None,
+                protocol: Protocol::Discord,
+                bot: false,
+            },
+            content: "hello".into(),
+            timestamp: 1000,
+            edited: false,
+            attachments: vec![],
+            reactions: vec![],
+            reply_to: None,
+        };
+
+        store.handle_event(&ChatEvent::MessageReceived(msg));
+        assert_eq!(store.active_messages().len(), 1);
+
+        store.handle_event(&ChatEvent::MessageDeleted {
+            channel_id: "ch1".into(),
+            message_id: "m1".into(),
+        });
+        assert_eq!(store.active_messages().len(), 0);
     }
 }

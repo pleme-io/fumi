@@ -1712,6 +1712,7 @@ dependencies = [
  "clap",
  "dirs",
  "egaku",
+ "futures-util",
  "garasu",
  "hasami",
  "irodzuki",

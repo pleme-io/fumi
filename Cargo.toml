@@ -48,6 +48,7 @@ tokio-tungstenite = "0.26"
 
 # HTTP + WebSocket
 reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
+futures-util = "0.3"
 serde_json = "1"
 
 # Notifications
@@ -67,7 +68,7 @@ anyhow = "1"
 url = "2"
 
 # Async runtime
-tokio = { version = "1", features = ["rt-multi-thread", "net", "sync", "macros"] }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "sync", "macros", "signal"] }
 dirs = "6.0"
 
 [dev-dependencies]

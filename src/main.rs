@@ -2,7 +2,7 @@
 //!
 //! Unified chat interface for Discord, Matrix, and Slack:
 //! - GPU-accelerated UI via garasu + egaku widgets
-//! - Rich text (markdown, embeds, reactions) via fude
+//! - Rich text (markdown, embeds, reactions) via mojiban
 //! - Voice chat via oto
 //! - Multi-protocol: one interface, many backends
 //! - Hot-reloadable configuration via shikumi

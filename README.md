@@ -5,7 +5,7 @@ GPU-rendered multi-protocol chat client. One interface for Discord, Matrix, and 
 ## Features
 
 - GPU-accelerated chat UI via garasu + egaku widgets
-- Rich text message rendering (markdown, embeds, reactions) via fude
+- Rich text message rendering (markdown, embeds, reactions) via mojiban
 - Voice chat via oto
 - Multi-protocol: Discord (serenity), Matrix (matrix-sdk), Slack (REST+WebSocket)
 - E2E encryption for Matrix rooms
@@ -21,14 +21,14 @@ GPU-rendered multi-protocol chat client. One interface for Discord, Matrix, and 
 | `discord` | Discord backend via serenity |
 | `matrix` | Matrix backend via matrix-sdk (E2E encrypted) |
 | `slack` | Slack backend via REST + Socket Mode |
-| `render` | GPU chat UI via garasu + egaku + fude |
+| `render` | GPU chat UI via garasu + egaku + mojiban |
 | `config` | shikumi-based multi-account configuration |
 
 ## Shared Libraries
 
 - **garasu** — GPU rendering engine
 - **egaku** — UI widgets (text input, message list, sidebar, tabs)
-- **fude** — rich text rendering (chat markdown, embeds)
+- **mojiban** — rich text rendering (chat markdown, embeds)
 - **oto** — voice chat (capture, playback, mute/deafen)
 - **tsunagu** — daemon IPC (persistent connections)
 - **shikumi** — config discovery + hot-reload

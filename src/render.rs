@@ -12,7 +12,7 @@
 //!   components: text input, scrollable lists, panels, tabs, splits, and
 //!   keybinding dispatch. All widgets render to garasu draw commands.
 //!
-//! - **fude** — Rich text renderer. Parses markdown (bold, italic, code,
+//! - **mojiban** — Rich text renderer. Parses markdown (bold, italic, code,
 //!   links, mentions, emoji shortcodes) into styled text spans and renders
 //!   them via garasu's text pipeline. Handles inline images, embeds, and
 //!   code blocks with syntax highlighting.
@@ -30,12 +30,12 @@
 //! |                  |                  |                            |                  |
 //! |  Server sidebar  |  Channel list    |  Message view              |  Member list     |
 //! |  (protocol       |  (channels for   |  (scrollable timeline,     |  (online/offline |
-//! |   icons, guild   |   the selected   |   rich text via fude,      |   users, roles,  |
+//! |   icons, guild   |   the selected   |   rich text via mojiban,   |   users, roles,  |
 //! |   icons, unread  |   server, unread |   attachments, embeds,     |   presence)      |
 //! |   badges)        |   counts, DMs,   |   reactions, replies)      |                  |
 //! |                  |   threads)       |                            |                  |
 //! |                  |                  +----------------------------+                  |
-//! |                  |                  |  Text input (fude editor,  |                  |
+//! |                  |                  |  Text input (mojiban editor,|                 |
 //! |                  |                  |  file upload, emoji picker)|                  |
 //! +------------------+------------------+----------------------------+------------------+
 //! ```
@@ -49,7 +49,7 @@
 //!    engine. Panels resize with the window; the message view takes remaining
 //!    space.
 //!
-//! 3. **Text** — fude converts message content (markdown + protocol-specific
+//! 3. **Text** — mojiban converts message content (markdown + protocol-specific
 //!    markup like `<@U123>` mentions) into styled spans with font metrics.
 //!
 //! 4. **Draw** — Widgets emit draw commands (quads, glyphs, images) to
@@ -68,7 +68,7 @@
 //! # Future work
 //!
 //! - Animated emoji and sticker rendering via garasu sprite sheets
-//! - Message search overlay with fude highlight spans
+//! - Message search overlay with mojiban highlight spans
 //! - Split-view: multiple channels side by side
 //! - Notification toasts rendered as garasu overlays
 //! - Theme hot-reload via shikumi config watcher
@@ -78,7 +78,7 @@
 // 1. Create a `ChatRenderer` struct that owns:
 //    - garasu::GpuContext (wgpu device, queue, surface)
 //    - egaku::WidgetTree (server sidebar, channel list, message view, members)
-//    - fude::TextRenderer (markdown → styled spans → glyphs)
+//    - mojiban::TextRenderer (markdown → styled spans → glyphs)
 //    - oto::AudioEngine (voice channel audio, optional)
 //
 // 2. Implement the render loop:

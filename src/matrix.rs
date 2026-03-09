@@ -116,8 +116,10 @@ impl ChatBackend for MatrixBackend {
                 let name = room
                     .cached_display_name()
                     .map(|n| n.to_string())
-                    .unwrap_or_else(|_| room.room_id().to_string());
-                let is_dm = room.is_direct().await_or(false);
+                    .unwrap_or_else(|| room.room_id().to_string());
+                // is_direct() is async and returns Result<bool>; in a sync map
+                // closure we cannot await, so default to false (text channel).
+                let is_dm = false;
                 Channel {
                     id: room.room_id().to_string(),
                     name,
@@ -293,26 +295,6 @@ impl ChatBackend for MatrixBackend {
 
     fn protocol(&self) -> Protocol {
         Protocol::Matrix
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/// Tiny helper to synchronously evaluate an async bool in a non-async context.
-/// Used only in the room→channel mapping above.
-trait AwaitOr {
-    fn await_or(self, default: bool) -> bool;
-}
-
-impl<F: std::future::Future<Output = bool>> AwaitOr for F {
-    fn await_or(self, default: bool) -> bool {
-        // In synchronous map closures we cannot `.await`. Fall back to default.
-        // The correct approach is to pre-fetch this info; for now we use the
-        // default so the type mapping compiles.
-        let _ = self;
-        default
     }
 }
 

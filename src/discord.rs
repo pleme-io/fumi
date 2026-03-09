@@ -223,7 +223,7 @@ fn discord_message_to_protocol(msg: &serenity_model::Message) -> Message {
             .iter()
             .map(|r| Reaction {
                 emoji: reaction_type_to_string(&r.reaction_type),
-                count: r.count.total() as u32,
+                count: r.count as u32,
                 me: r.me,
             })
             .collect(),
@@ -242,7 +242,7 @@ fn discord_user_to_protocol(user: &serenity_model::User) -> User {
         display_name: user.global_name.clone(),
         avatar_url: user.avatar_url(),
         protocol: Protocol::Discord,
-        bot: user.bot(),
+        bot: user.bot,
     }
 }
 

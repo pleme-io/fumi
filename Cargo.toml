@@ -1,0 +1,74 @@
+[package]
+name = "fumi"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.89.0"
+description = "Fumi (文) — GPU-rendered multi-protocol chat client: Discord, Matrix, Slack"
+homepage = "https://github.com/pleme-io/fumi"
+repository = "https://github.com/pleme-io/fumi"
+readme = "README.md"
+license = "MIT"
+documentation = "https://docs.rs/fumi"
+categories = ["command-line-utilities"]
+keywords = ["chat", "discord", "matrix", "slack", "gpu"]
+publish = true
+
+[lints.clippy]
+pedantic = "warn"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "z"
+strip = true
+
+[dependencies]
+# Pleme-io shared libraries
+garasu = { git = "https://github.com/pleme-io/garasu" }
+madori = { git = "https://github.com/pleme-io/madori" }
+egaku = { git = "https://github.com/pleme-io/egaku" }
+irodzuki = { git = "https://github.com/pleme-io/irodzuki" }
+fude = { git = "https://github.com/pleme-io/fude" }
+hikidashi = { git = "https://github.com/pleme-io/hikidashi" }
+oto = { git = "https://github.com/pleme-io/oto" }
+todoku = { git = "https://github.com/pleme-io/todoku" }
+tsunagu = { git = "https://github.com/pleme-io/tsunagu" }
+kotoba = { git = "https://github.com/pleme-io/kotoba" }
+shikumi = { git = "https://github.com/pleme-io/shikumi" }
+
+# GPU rendering
+wgpu = "25"
+winit = "0.30"
+pollster = "0.4"
+
+# Chat protocols
+serenity = { version = "0.12", default-features = false, features = ["client", "gateway", "model", "cache", "voice"] }
+matrix-sdk = { version = "0.9", features = ["e2e-encryption"] }
+tokio-tungstenite = "0.26"
+
+# HTTP + WebSocket
+reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
+serde_json = "1"
+
+# Notifications
+notify-rust = "4"
+
+# CLI and config
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
+
+# URL parsing
+url = "2"
+
+# Async runtime
+tokio = { version = "1", features = ["rt-multi-thread", "net", "sync", "macros"] }
+dirs = "6.0"
+
+[dev-dependencies]
+tempfile = "3"

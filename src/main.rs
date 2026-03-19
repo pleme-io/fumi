@@ -19,7 +19,6 @@ mod scripting;
 mod slack;
 
 use clap::{Parser, Subcommand};
-use tracing_subscriber::EnvFilter;
 
 use crate::config::FumiConfig;
 use crate::protocol::{ChatBackend, Protocol};
@@ -62,9 +61,7 @@ enum Commands {
 }
 
 fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
-        .init();
+    shidou::init_tracing();
 
     let cli = Cli::parse();
     let config = config::load(&cli.config)?;
@@ -90,7 +87,7 @@ fn main() -> anyhow::Result<()> {
             check_health();
         }
         Some(Commands::Mcp) => {
-            let rt = tokio::runtime::Runtime::new()?;
+            let rt = shidou::create_runtime()?;
             rt.block_on(async {
                 mcp::run().await.map_err(|e| anyhow::anyhow!("MCP server error: {e}"))
             })?;
@@ -109,7 +106,7 @@ fn run_gui(config: FumiConfig) -> anyhow::Result<()> {
     let mut ui_state = ChatUiState::new();
 
     // Build the tokio runtime for async protocol connections.
-    let rt = tokio::runtime::Runtime::new()?;
+    let rt = shidou::create_runtime()?;
 
     // Connect backends and populate initial data.
     rt.block_on(async {
@@ -161,7 +158,7 @@ fn run_gui(config: FumiConfig) -> anyhow::Result<()> {
 fn run_daemon(config: FumiConfig) -> anyhow::Result<()> {
     tracing::info!("starting fumi daemon");
 
-    let rt = tokio::runtime::Runtime::new()?;
+    let rt = shidou::create_runtime()?;
     rt.block_on(async {
         let mut daemon = daemon::FumiDaemon::new(config);
 
@@ -234,7 +231,7 @@ fn send_message(
     channel: &str,
     message: &str,
 ) -> anyhow::Result<()> {
-    let rt = tokio::runtime::Runtime::new()?;
+    let rt = shidou::create_runtime()?;
     rt.block_on(async {
         match protocol {
             "discord" => {

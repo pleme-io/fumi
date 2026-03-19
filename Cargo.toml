@@ -24,6 +24,7 @@ strip = true
 
 [dependencies]
 # Pleme-io shared libraries
+shidou = { git = "https://github.com/pleme-io/shidou" }
 garasu = { git = "https://github.com/pleme-io/garasu" }
 madori = { git = "https://github.com/pleme-io/madori" }
 egaku = { git = "https://github.com/pleme-io/egaku" }
@@ -64,7 +65,6 @@ notify-rust = "4"
 clap = { version = "4", features = ["derive", "env"] }
 serde = { version = "1.0", features = ["derive"] }
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # Error handling
 thiserror = "2"
@@ -79,3 +79,6 @@ dirs = "6.0"
 
 [dev-dependencies]
 tempfile = "3"
+
+[patch."https://github.com/pleme-io/shidou"]
+shidou = { path = "../shidou" }

@@ -2,7 +2,7 @@
   description = "Fumi (文) — GPU-rendered multi-protocol chat client";
 
   inputs = {
-    nixpkgs.url = "github:nixos/nixpkgs?ref=nixos-unstable";
+    nixpkgs.url = "github:nixos/nixpkgs?ref=nixos-25.11";
     crate2nix.url = "github:nix-community/crate2nix";
     flake-utils.url = "github:numtide/flake-utils";
     substrate = {

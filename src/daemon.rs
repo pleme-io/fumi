@@ -154,9 +154,12 @@ impl FumiDaemon {
             }
         });
 
-        // Wait for shutdown signal.
-        tokio::signal::ctrl_c().await?;
-        tracing::info!("fumi daemon shutting down");
+        // Drain on SIGTERM/SIGINT. `ShutdownController::install` is
+        // idempotent enough for daemon-mode binaries that run once per
+        // process lifetime.
+        let controller = tsunagu::ShutdownController::install();
+        controller.token().wait().await;
+        tracing::info!("fumi daemon draining");
         self.running = false;
 
         Ok(())

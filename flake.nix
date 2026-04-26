@@ -24,10 +24,8 @@
       toolName = "fumi";
       src = self;
       repo = "pleme-io/fumi";
-    }
-    // {
-      homeManagerModules.default = import ./module {
-        hmHelpers = import "${substrate}/lib/hm-service-helpers.nix" { lib = nixpkgs.lib; };
+      module = {
+        description = "Fumi (文) — GPU-rendered multi-protocol chat client";
       };
     };
 }

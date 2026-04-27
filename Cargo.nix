@@ -18837,7 +18837,12 @@ rec {
         crateName = "shidou";
         version = "0.1.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../shidou; };
+        workspace_member = null;
+        src = pkgs.fetchgit {
+          url = "https://github.com/pleme-io/shidou";
+          rev = "fe2c71849d2bd198b561646ac755e8faa5bbcb58";
+          sha256 = "19p0zbn7yy1w53qgzcayg4nskf0w3cl77axh8wvnzcs0dzgw3wbp";
+        };
         dependencies = [
           {
             name = "anyhow";

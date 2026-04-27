@@ -5384,6 +5384,7 @@ dependencies = [
 [[package]]
 name = "shidou"
 version = "0.1.0"
+source = "git+https://github.com/pleme-io/shidou#fe2c71849d2bd198b561646ac755e8faa5bbcb58"
 dependencies = [
  "anyhow",
  "clap",

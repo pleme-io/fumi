@@ -1,5 +1,16 @@
 # Fumi (文) -- GPU Multi-Protocol Chat Client
 
+> **★★★ CSE / Knowable Construction.** This repo operates under
+> **Constructive Substrate Engineering** — canonical specification at
+> [`pleme-io/theory/CONSTRUCTIVE-SUBSTRATE-ENGINEERING.md`](https://github.com/pleme-io/theory/blob/main/CONSTRUCTIVE-SUBSTRATE-ENGINEERING.md).
+> The Compounding Directive (operational rules: solve once, load-bearing
+> fixes only, idiom-first, models stay current, direction beats velocity)
+> is in the org-level pleme-io/CLAUDE.md ★★★ section. Read both before
+> non-trivial changes. GPU chat client; the typed protocol surface
+> (Discord/Matrix/Slack/hiroba) is one of fumi's compounding primitives —
+> add a protocol once, every transport, MCP tool, and Rhai binding renders
+> from the same domain types.
+
 Unified GPU-rendered chat client for Discord, Matrix, and Slack. Three protocols,
 one interface, vim-modal, MCP-drivable, Rhai-scriptable.
 

@@ -21549,7 +21549,7 @@ rec {
         src = pkgs.fetchgit {
           url = "https://github.com/pleme-io/tsunagu";
           rev = "abc9944a8b0fc46db7d0f50e0fde9a4aeed8afb5";
-          sha256 = "08khcqbwp54i46zyvxcvvxjzridz0f3nrj4bdi22w56c2zzr9a88";
+          sha256 = "0mmp5a6qbnmdqxwsj37gmhyvaz6mx0axj101jlvbrhal69pvbagw";
         };
         dependencies = [
           {

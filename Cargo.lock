@@ -1748,6 +1748,7 @@ dependencies = [
  "garasu",
  "hasami",
  "irodzuki",
+ "ishou-tokens",
  "kaname",
  "madori",
  "matrix-sdk",
@@ -2615,6 +2616,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "irodori"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0dc14b88cf12196c0f37995676c3cd75c34511436be9c41f7877edb8b1cfcb1e"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "irodzuki"
 version = "0.1.0"
 source = "git+https://github.com/pleme-io/irodzuki#c52834c6279013929586e9767347ca94aba800cb"
@@ -2633,6 +2643,17 @@ name = "is_terminal_polyfill"
 version = "1.70.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a6cb138bb79a146c1bd460005623e142ef0181e3d0219cb493e02f7d08a35695"
+
+[[package]]
+name = "ishou-tokens"
+version = "0.1.0"
+source = "git+https://github.com/pleme-io/ishou#b5089152df026c1d703f8012360e387fde4ba4c1"
+dependencies = [
+ "irodori",
+ "serde",
+ "serde_json",
+ "wgpu-types",
+]
 
 [[package]]
 name = "itertools"

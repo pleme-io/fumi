@@ -29,6 +29,9 @@ garasu = { git = "https://github.com/pleme-io/garasu" }
 madori = { git = "https://github.com/pleme-io/madori" }
 egaku = { git = "https://github.com/pleme-io/egaku" }
 irodzuki = { git = "https://github.com/pleme-io/irodzuki" }
+# ishou-tokens — typed design-system source + gamma-correct GPU bridge.
+# See pleme-io/theory/THEME-ARCHITECTURE.md.
+ishou-tokens = { git = "https://github.com/pleme-io/ishou", features = ["wgpu"] }
 mojiban = { git = "https://github.com/pleme-io/mojiban" }
 hasami = { git = "https://github.com/pleme-io/hasami" }
 oto = { git = "https://github.com/pleme-io/oto" }

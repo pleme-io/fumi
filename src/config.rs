@@ -249,6 +249,153 @@ fn default_ptt_key() -> String {
 }
 
 // ---------------------------------------------------------------------------
+// TieredConfig impls (shikumi prime directive)
+// ---------------------------------------------------------------------------
+
+impl shikumi::TieredConfig for FumiConfig {
+    /// Tier 0 — zero-opinion floor. Empty account list, sub-configs at
+    /// their own bare floor. Documents the minimum that won't connect
+    /// to any chat service or render any UI choice.
+    fn bare() -> Self {
+        Self {
+            accounts: <AccountsConfig as shikumi::TieredConfig>::bare(),
+            behavior: <BehaviorConfig as shikumi::TieredConfig>::bare(),
+            appearance: <AppearanceConfig as shikumi::TieredConfig>::bare(),
+            voice: <VoiceConfig as shikumi::TieredConfig>::bare(),
+            keybindings: <KeybindingsConfig as shikumi::TieredConfig>::bare(),
+        }
+    }
+
+    fn prescribed_default() -> Self {
+        Self::default()
+    }
+}
+
+impl shikumi::TieredConfig for AccountsConfig {
+    fn bare() -> Self {
+        Self::default()
+    }
+
+    fn prescribed_default() -> Self {
+        Self::default()
+    }
+}
+
+impl shikumi::TieredConfig for DiscordAccount {
+    /// Per-account; no curated fleet default exists (token required).
+    fn bare() -> Self {
+        Self {
+            label: String::new(),
+            token: None,
+            token_command: None,
+        }
+    }
+
+    fn prescribed_default() -> Self {
+        Self::bare()
+    }
+}
+
+impl shikumi::TieredConfig for MatrixAccount {
+    /// Per-account; no curated fleet default exists (homeserver + creds
+    /// required).
+    fn bare() -> Self {
+        Self {
+            label: String::new(),
+            homeserver: String::new(),
+            username: String::new(),
+            token: None,
+            token_command: None,
+            password_command: None,
+        }
+    }
+
+    fn prescribed_default() -> Self {
+        Self::bare()
+    }
+}
+
+impl shikumi::TieredConfig for SlackAccount {
+    /// Per-account; no curated fleet default exists (workspace + token
+    /// required).
+    fn bare() -> Self {
+        Self {
+            label: String::new(),
+            workspace: String::new(),
+            token: None,
+            token_command: None,
+            app_token: None,
+            app_token_command: None,
+        }
+    }
+
+    fn prescribed_default() -> Self {
+        Self::bare()
+    }
+}
+
+impl shikumi::TieredConfig for BehaviorConfig {
+    fn bare() -> Self {
+        Self {
+            notifications: false,
+            notification_filter: String::new(),
+            daemon_mode: false,
+            startup_channels: Vec::new(),
+            sound: false,
+            dnd_hours: None,
+        }
+    }
+
+    fn prescribed_default() -> Self {
+        Self::default()
+    }
+}
+
+impl shikumi::TieredConfig for AppearanceConfig {
+    fn bare() -> Self {
+        Self {
+            theme: String::new(),
+            background: String::new(),
+            foreground: String::new(),
+            accent: String::new(),
+            compact_mode: false,
+            show_avatars: false,
+            font_size: 0.0,
+        }
+    }
+
+    fn prescribed_default() -> Self {
+        Self::default()
+    }
+}
+
+impl shikumi::TieredConfig for VoiceConfig {
+    fn bare() -> Self {
+        Self {
+            echo_cancellation: false,
+            noise_suppression: false,
+            input_volume: 0.0,
+            push_to_talk: false,
+            push_to_talk_key: String::new(),
+        }
+    }
+
+    fn prescribed_default() -> Self {
+        Self::default()
+    }
+}
+
+impl shikumi::TieredConfig for KeybindingsConfig {
+    fn bare() -> Self {
+        Self::default()
+    }
+
+    fn prescribed_default() -> Self {
+        Self::default()
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Token resolution
 // ---------------------------------------------------------------------------
 
@@ -357,5 +504,66 @@ mod tests {
         let config = AppearanceConfig::default();
         assert_eq!(config.theme, "nord");
         assert!((config.font_size - 14.0).abs() < f32::EPSILON);
+    }
+}
+
+#[cfg(test)]
+mod tiered_tests {
+    use super::*;
+    use shikumi::{ConfigTier, TieredConfig};
+
+    #[test]
+    fn bare_is_zero_opinion() {
+        let b = <FumiConfig as TieredConfig>::bare();
+        assert!(b.accounts.discord.is_empty());
+        assert!(b.accounts.matrix.is_empty());
+        assert!(b.accounts.slack.is_empty());
+        assert!(!b.behavior.notifications);
+        assert_eq!(b.behavior.notification_filter, "");
+        assert!(!b.behavior.sound);
+        assert_eq!(b.appearance.theme, "");
+        assert_eq!(b.appearance.background, "");
+        assert!(!b.appearance.compact_mode);
+        assert!((b.appearance.font_size - 0.0).abs() < f32::EPSILON);
+        assert!(!b.voice.echo_cancellation);
+        assert!((b.voice.input_volume - 0.0).abs() < f32::EPSILON);
+        assert_eq!(b.voice.push_to_talk_key, "");
+        assert!(b.keybindings.overrides.is_empty());
+    }
+
+    #[test]
+    fn prescribed_matches_default() {
+        let p = <FumiConfig as TieredConfig>::prescribed_default();
+        let d = FumiConfig::default();
+        assert_eq!(p.appearance.theme, d.appearance.theme);
+        assert_eq!(p.behavior.notification_filter, d.behavior.notification_filter);
+        assert!((p.appearance.font_size - d.appearance.font_size).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn diff_bare_vs_default_is_non_empty() {
+        let b = <FumiConfig as TieredConfig>::bare();
+        let d = <FumiConfig as TieredConfig>::prescribed_default();
+        let diff = d.diff_against(&b);
+        assert!(
+            !diff.is_empty_diff(),
+            "bare and prescribed_default must differ"
+        );
+    }
+
+    #[test]
+    fn resolve_tier_dispatches() {
+        assert_eq!(
+            <FumiConfig as TieredConfig>::resolve_tier(ConfigTier::Bare)
+                .appearance
+                .theme,
+            ""
+        );
+        assert_eq!(
+            <FumiConfig as TieredConfig>::resolve_tier(ConfigTier::Default)
+                .appearance
+                .theme,
+            "nord"
+        );
     }
 }

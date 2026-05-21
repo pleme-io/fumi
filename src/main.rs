@@ -58,6 +58,8 @@ enum Commands {
     Health,
     /// Start MCP server (stdio transport)
     Mcp,
+    /// Inspect tiered configuration (bare/discovered/default/extend/diff)
+    ConfigShow(shikumi::cli::ConfigShowCommand),
 }
 
 fn main() -> anyhow::Result<()> {
@@ -91,6 +93,10 @@ fn main() -> anyhow::Result<()> {
             rt.block_on(async {
                 mcp::run().await.map_err(|e| anyhow::anyhow!("MCP server error: {e}"))
             })?;
+        }
+        Some(Commands::ConfigShow(cmd)) => {
+            cmd.run::<crate::config::FumiConfig>("FUMI_TIER")
+                .map_err(|e| anyhow::anyhow!("config-show failed: {e}"))?;
         }
     }
 

@@ -38,7 +38,7 @@ oto = { git = "https://github.com/pleme-io/oto" }
 todoku = { git = "https://github.com/pleme-io/todoku" }
 tsunagu = { git = "https://github.com/pleme-io/tsunagu" }
 kaname = { git = "https://github.com/pleme-io/kaname" }
-shikumi = { git = "https://github.com/pleme-io/shikumi" }
+shikumi = { git = "https://github.com/pleme-io/shikumi", features = ["cli"] }
 soushi = { git = "https://github.com/pleme-io/soushi" }
 awase = { git = "https://github.com/pleme-io/awase" }
 

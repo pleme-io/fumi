@@ -567,3 +567,31 @@ mod tiered_tests {
         );
     }
 }
+
+// ── Fleet convergence guard ──────────────────────────────────────
+//
+// Every visual default above MUST match the corresponding field on
+// `ishou_tokens::FleetDefaults::prescribed()`. If they drift,
+// fumi's defaults silently diverge from the rest of the fleet
+// (mado, escriba, namimado, hibiki, hikki, etc.). The test below
+// enforces convergence at compile-time-of-the-test-suite.
+
+#[cfg(test)]
+mod fleet_convergence_tests {
+    use super::*;
+
+    /// One-line convergence guard — pinned to
+    /// `ishou_tokens::convergence::Guard` (ishou@1cfd3cf). Drift on
+    /// any default visual field surfaces as a single panic listing
+    /// every field that diverged. Pattern reused from mado@cdded35.
+    ///
+    /// fumi's appearance theme is a free-form string ("nord") rather
+    /// than a `FleetTheme` enum, so only `font_size` participates in
+    /// the convergence guard today.
+    #[test]
+    fn fallback_defaults_converge_with_fleet() {
+        ishou_tokens::convergence::Guard::for_app("fumi")
+            .expect_font_size(default_font_size())
+            .run();
+    }
+}

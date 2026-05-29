@@ -13,6 +13,10 @@ categories = ["command-line-utilities"]
 keywords = ["chat", "discord", "matrix", "slack", "gpu"]
 publish = true
 
+
+[package.metadata.pleme]
+description = "Fumi (文) — GPU-rendered multi-protocol chat client"
+
 [lints.clippy]
 pedantic = "warn"
 
